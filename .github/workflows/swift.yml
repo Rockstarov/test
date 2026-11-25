@@ -1,11 +1,6 @@
 name: iOS demo unsigned IPA
 
-on:
-  workflow_dispatch:
-  push:
-    paths:
-      - "demo-ios/**"
-      - ".github/workflows/ios-demo-ipa.yml"
+on: workflow_dispatch
 
 permissions:
   contents: read
@@ -16,56 +11,59 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Install XcodeGen
-        run: |
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            brew install xcodegen
-          fi
-          xcodegen --version
-          xcodebuild -version
-
-      - name: Generate Xcode project from project.yml
-        working-directory: demo-ios
-        run: |
-          xcodegen generate
-          ls -la
-          xcodebuild -list -project DemoApp.xcodeproj
+      - uses: actions/checkout@v4
 
       - name: Build unsigned archive
         run: |
           set -euo pipefail
           mkdir -p build
-          set -o pipefail
+          command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen --version
+
+          cd demo-ios
+          xcodegen generate
+          cd ..
+
           xcodebuild archive \
             -project demo-ios/DemoApp.xcodeproj \
             -scheme DemoApp \
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath build/DemoApp.xcarchive \
-            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
-            DEVELOPMENT_TEAM="" \
-            2>&1 | tee build/xcodebuild.log
+            2>&1 | tee build.log
 
-      - name: Package Payload into .ipa
+      - name: Package into .ipa
         run: |
           set -euo pipefail
           APP_PATH="$(find build/DemoApp.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -print -quit)"
-          if [ -z "$APP_PATH" ]; then
-            echo "::error::В архиве нет .app — смотри лог"
-            exit 1
-          fi
+          test -n "$APP_PATH"
           echo "App: $APP_PATH"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
-          /usr/libexec/PlistBuddy -
+
+          rm -rf out
+          mkdir -p out/Payload
+          cp -R "$APP_PATH" out/Payload/
+          cd out
+          zip -qry app-unsigned.ipa Payload
+          ls -lh app-unsigned.ipa
+
+      - name: Upload .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-unsigned-ipa
+          path: out/app-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 7
