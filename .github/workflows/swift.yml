@@ -1,0 +1,71 @@
+name: iOS demo unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "demo-ios/**"
+      - ".github/workflows/ios-demo-ipa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodebuild -version
+
+      - name: Generate Xcode project from project.yml
+        working-directory: demo-ios
+        run: |
+          xcodegen generate
+          ls -la
+          xcodebuild -list -project DemoApp.xcodeproj
+
+      - name: Build unsigned archive
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          set -o pipefail
+          xcodebuild archive \
+            -project demo-ios/DemoApp.xcodeproj \
+            -scheme DemoApp \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/DemoApp.xcarchive \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tee build/xcodebuild.log
+
+      - name: Package Payload into .ipa
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/DemoApp.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::В архиве нет .app — смотри лог"
+            exit 1
+          fi
+          echo "App: $APP_PATH"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -
