@@ -42,6 +42,12 @@ jobs:
           APP_PATH="$(find build/DemoApp.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -print -quit)"
           test -n "$APP_PATH"
           echo "App: $APP_PATH"
+
+          # Ad-hoc РїРѕРґРїРёСЃСЊ: РґРѕР±Р°РІР»СЏРµС‚ LC_CODE_SIGNATURE, Р±РµР· РєРѕС‚РѕСЂРѕРіРѕ
+          # Sideloadly РЅРµ РјРѕР¶РµС‚ РїРµСЂРµРїРѕРґРїРёСЃР°С‚СЊ Р±Р°РЅРґР» РїРѕРґ Apple ID.
+          codesign --force --sign - "$APP_PATH"
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -10 || true
+
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
 
           rm -rf out
