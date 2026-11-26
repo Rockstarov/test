@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           XCODE_VER="${{ inputs.xcode_override }}"
           if [ -z "$XCODE_VER" ]; then
-            XCODE_VER="$(xcodebuild -version | head -1 | awk '{print $2}')"
+           XCODE_VER="$(xcodebuild -version | awk 'NR==1{print $2}')"
           fi
           echo "Using Xcode override: $XCODE_VER"
           python3 build-system/Make/Make.py \
