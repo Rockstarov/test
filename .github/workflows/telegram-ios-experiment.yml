@@ -3,22 +3,11 @@ name: Telegram-iOS unsigned IPA (experiment)
 # РџСЂРѕР±Р°: СЃРѕР±СЂР°С‚СЊ Telegram-iOS РІ РЅРµРїРѕРґРїРёСЃР°РЅРЅС‹Р№ .ipa РЅР° macOS-СЂР°РЅРЅРµСЂРµ.
 # Р­С‚Рѕ РќР• AyuGram вЂ” РІР°РЅРёР»СЊРЅС‹Р№ Telegram, С„РёС‡Рё AyuGram РІ iOS-РєРѕРґРµ РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‚.
 #
-# РќСѓР¶РЅС‹ СЃРµРєСЂРµС‚С‹ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ:
-#   TELEGRAM_API_ID   вЂ” С‡РёСЃР»Рѕ СЃ https://my.telegram.org/apps
-#   TELEGRAM_API_HASH вЂ” СЃС‚СЂРѕРєР° РѕС‚С‚СѓРґР° Р¶Рµ
-# Р‘РµР· РЅРёС… РїРѕРґСЃС‚Р°РІРёС‚СЃСЏ Р·Р°РіР»СѓС€РєР°: СЃР±РѕСЂРєР° РїСЂРѕР№РґС‘С‚, РІС…РѕРґ РІ Р°РєРєР°СѓРЅС‚ вЂ” РЅРµС‚.
+# РЎРµРєСЂРµС‚С‹ (РЅРµРѕР±СЏР·Р°С‚РµР»СЊРЅС‹ РґР»СЏ СЃР±РѕСЂРєРё, РЅСѓР¶РЅС‹ РґР»СЏ РІС…РѕРґР° РІ Р°РєРєР°СѓРЅС‚):
+#   TELEGRAM_API_ID, TELEGRAM_API_HASH вЂ” СЃ https://my.telegram.org/apps
 
 on:
   workflow_dispatch:
-    inputs:
-      xcode_override:
-        description: "Р’РµСЂСЃРёСЏ Xcode РґР»СЏ --overrideXcodeVersion (РїСѓСЃС‚Рѕ = Р°РІС‚РѕРѕРїСЂРµРґРµР»РµРЅРёРµ)"
-        required: false
-        default: ""
-      bazel_override:
-        description: "Р’РµСЂСЃРёСЏ Bazel РґР»СЏ --overrideBazelVersion"
-        required: false
-        default: "9.2.0"
 
 permissions:
   contents: read
@@ -67,43 +56,52 @@ jobs:
           JSON
           cat build-system/ci-configuration.json
 
-      - name: Build (Bazel)
+      - name: Generate Xcode project
         working-directory: telegram-ios
         run: |
           set -euo pipefail
-          XCODE_VER="${{ inputs.xcode_override }}"
-          if [ -z "$XCODE_VER" ]; then
-           XCODE_VER="$(xcodebuild -version | awk 'NR==1{print $2}')"
-          fi
-          echo "Using Xcode override: $XCODE_VER"
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
-            build \
+            --overrideXcodeVersion \
+            --overrideBazelVersion \
+            generateProject \
             --configurationPath=build-system/ci-configuration.json \
+            --xcodeManagedCodesigning \
             --disableProvisioningProfiles \
-            --disableExtensions \
             --buildNumber=100001 \
-            --configuration=release_arm64 \
-            --overrideBazelVersion="${{ inputs.bazel_override }}" \
-            --overrideXcodeVersion="$XCODE_VER" \
-                        > "$GITHUB_WORKSPACE/build.log" 2>&1
+            2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
 
-      - name: Locate .app
+      - name: Build with xcodebuild
+        working-directory: telegram-ios
         run: |
-          find telegram-ios -maxdepth 8 -name '*.app' -type d | head -20
-          find telegram-ios -maxdepth 8 -name '*.app' -type d | head -1 > app-path.txt
-          cat app-path.txt
+          set -euo pipefail
+          PROJ="$(find . -maxdepth 3 -name '*.xcodeproj' -print -quit)"
+          echo "project: $PROJ"
+          test -n "$PROJ"
+          xcodebuild -list -project "$PROJ" | tee -a "$GITHUB_WORKSPACE/build.log"
+
+          xcodebuild \
+            -project "$PROJ" \
+            -scheme Telegram \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
 
       - name: Package into .ipa
         run: |
           set -euo pipefail
-          APP_PATH="$(cat app-path.txt)"
-          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "::error::.app РЅРµ РЅР°Р№РґРµРЅ вЂ” СЃРјРѕС‚СЂРё build.log"
-            exit 1
-          fi
+          APP_PATH="$(find telegram-ios -path '*/Build/Products/*' -maxdepth 8 -name '*.app' -type d -print -quit)"
+          echo "app: $APP_PATH"
+          test -n "$APP_PATH"
+
           codesign --force --sign - "$APP_PATH" || true
-          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -10 || true
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -5 || true
 
           rm -rf out && mkdir -p out/Payload
           cp -R "$APP_PATH" out/Payload/
