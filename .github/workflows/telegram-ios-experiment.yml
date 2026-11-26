@@ -56,20 +56,29 @@ jobs:
           JSON
           cat build-system/ci-configuration.json
 
+      - name: Disable provisioning profiles in bazelrc
+        working-directory: telegram-ios
+        run: |
+          echo 'common --//Telegram:disableProvisioningProfiles' >> .bazelrc
+
       - name: Generate Xcode project
         working-directory: telegram-ios
         run: |
           set -euo pipefail
+          mkdir -p build-system/empty-signing/profiles build-system/empty-signing/certs
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             --overrideXcodeVersion \
             --overrideBazelVersion \
             generateProject \
             --configurationPath=build-system/ci-configuration.json \
-            --xcodeManagedCodesigning \
+            --codesigningInformationPath=build-system/empty-signing \
             --disableProvisioningProfiles \
             --buildNumber=100001 \
             2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
+          if [ -f xcodeproj.bazelrc ]; then
+            echo 'build --//Telegram:disableProvisioningProfiles' >> xcodeproj.bazelrc
+          fi
 
       - name: Build with xcodebuild
         working-directory: telegram-ios
