@@ -1,9 +1,11 @@
 name: Telegram-iOS unsigned IPA (experiment)
 
-# РџСЂРѕР±Р°: СЃРѕР±СЂР°С‚СЊ Telegram-iOS РІ РЅРµРїРѕРґРїРёСЃР°РЅРЅС‹Р№ .ipa РЅР° macOS-СЂР°РЅРЅРµСЂРµ.
-# Р­С‚Рѕ РќР• AyuGram вЂ” РІР°РЅРёР»СЊРЅС‹Р№ Telegram, С„РёС‡Рё AyuGram РІ iOS-РєРѕРґРµ РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‚.
+# РЎР±РѕСЂРєР° РІР°РЅРёР»СЊРЅРѕРіРѕ Telegram-iOS РІ .ipa РЅР° macOS-СЂР°РЅРЅРµСЂРµ Р±РµР· Apple-Р°РєРєР°СѓРЅС‚Р°.
+# РСЃРїРѕР»СЊР·СѓСЋС‚СЃСЏ С€С‚Р°С‚РЅС‹Рµ "С„РµР№РєРѕРІС‹Рµ" РїСЂРѕС„РёР»Рё РёР· build-system/fake-codesigning
+# (self-signed СЃРµСЂС‚РёС„РёРєР°С‚) вЂ” РїСЂРёР»РѕР¶РµРЅРёРµ РїРѕРґРїРёСЃС‹РІР°РµС‚СЃСЏ СЃР°РјРѕРїРѕРґРїРёСЃР°РЅРЅС‹Рј СЃРµСЂС‚РѕРј,
+# Р° Sideloadly РїРµСЂРµРїРѕРґРїРёС€РµС‚ РµРіРѕ С‚РІРѕРёРј Р±РµСЃРїР»Р°С‚РЅС‹Рј Apple ID РїСЂРё СѓСЃС‚Р°РЅРѕРІРєРµ.
 #
-# РЎРµРєСЂРµС‚С‹ (РЅРµРѕР±СЏР·Р°С‚РµР»СЊРЅС‹ РґР»СЏ СЃР±РѕСЂРєРё, РЅСѓР¶РЅС‹ РґР»СЏ РІС…РѕРґР° РІ Р°РєРєР°СѓРЅС‚):
+# РЎРµРєСЂРµС‚С‹ (РЅСѓР¶РЅС‹ С‚РѕР»СЊРєРѕ РґР»СЏ РІС…РѕРґР° РІ Р°РєРєР°СѓРЅС‚ Telegram РІ РїСЂРёР»РѕР¶РµРЅРёРё):
 #   TELEGRAM_API_ID, TELEGRAM_API_HASH вЂ” СЃ https://my.telegram.org/apps
 
 on:
@@ -39,12 +41,14 @@ jobs:
         run: |
           API_ID="${API_ID:-1}"
           API_HASH="${API_HASH:-0123456789abcdef0123456789abcdef}"
+          # bundle_id Рё team_id РґРѕР»Р¶РЅС‹ СЃРѕРІРїР°РґР°С‚СЊ СЃ РїСЂРѕС„РёР»СЏРјРё РёР·
+          # build-system/fake-codesigning/profiles (С‚Р°Рј ph.telegra.Telegraph / C67CF9S4VU)
           cat > build-system/ci-configuration.json <<JSON
           {
-            "bundle_id": "com.example.tgclone.Telegram",
+            "bundle_id": "ph.telegra.Telegraph",
             "api_id": "$API_ID",
             "api_hash": "$API_HASH",
-            "team_id": "XXXXXXXXXX",
+            "team_id": "C67CF9S4VU",
             "is_internal_build": "true",
             "is_appstore_build": "false",
             "appstore_id": "0",
@@ -56,56 +60,35 @@ jobs:
           JSON
           cat build-system/ci-configuration.json
 
-      - name: Disable provisioning profiles in bazelrc
+      - name: Import self-signed certificate
         working-directory: telegram-ios
         run: |
-          echo 'common --//Telegram:disableProvisioningProfiles' >> .bazelrc
-          echo 'common --//Telegram:disableExtensions' >> .bazelrc
+          set -euo pipefail
+          security create-keychain -p build build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security unlock-keychain -p build build.keychain
+          security list-keychains -d user -s build.keychain "$HOME/Library/Keychains/login.keychain-db"
+          security default-keychain -s build.keychain
+          security import build-system/fake-codesigning/certs/SelfSigned.p12 \
+            -k build.keychain -P "" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k build build.keychain
+          security find-identity -v -p codesigning build.keychain
 
       - name: Generate Xcode project
         working-directory: telegram-ios
         run: |
           set -euo pipefail
-          SIGN_DIR=build-system/empty-signing
-          mkdir -p "$SIGN_DIR/profiles" "$SIGN_DIR/certs"
-
-          # Make.py С‚СЂРµР±СѓРµС‚ aps-environment РІ РїСЂРѕС„РёР»Рµ, РЅРѕ Bazel РїСЂРѕС„РёР»Рё РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚
-          # (РѕС‚РєР»СЋС‡РµРЅС‹ С‡РµСЂРµР· --//Telegram:disableProvisioningProfiles). Р”РµР»Р°РµРј С„РµР№РєРѕРІС‹Р№.
-          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
-            -keyout "$SIGN_DIR/key.pem" -out "$SIGN_DIR/cert.pem" -subj "/CN=fake" >/dev/null 2>&1
-          cat > "$SIGN_DIR/profile.plist" <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>Entitlements</key>
-            <dict>
-              <key>application-identifier</key>
-              <string>XXXXXXXXXX.com.example.tgclone.Telegram</string>
-              <key>aps-environment</key>
-              <string>development</string>
-            </dict>
-          </dict>
-          </plist>
-          PLIST
-          openssl smime -sign -binary -nodetach -in "$SIGN_DIR/profile.plist" \
-            -signer "$SIGN_DIR/cert.pem" -inkey "$SIGN_DIR/key.pem" \
-            -outform der -out "$SIGN_DIR/profiles/fake.mobileprovision"
-
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             --overrideXcodeVersion \
             --overrideBazelVersion \
             generateProject \
             --configurationPath=build-system/ci-configuration.json \
-            --codesigningInformationPath=build-system/empty-signing \
-            --disableProvisioningProfiles \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --disableExtensions \
             --buildNumber=100001 \
             2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
-          if [ -f xcodeproj.bazelrc ]; then
-            echo 'build --//Telegram:disableProvisioningProfiles' >> xcodeproj.bazelrc
-            echo 'build --//Telegram:disableExtensions' >> xcodeproj.bazelrc
-          fi
 
       - name: Build with xcodebuild
         working-directory: telegram-ios
@@ -122,11 +105,6 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            DEVELOPMENT_TEAM="" \
             2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
 
       - name: Package into .ipa
@@ -136,8 +114,7 @@ jobs:
           echo "app: $APP_PATH"
           test -n "$APP_PATH"
 
-          codesign --force --sign - "$APP_PATH" || true
-          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -5 || true
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -10 || true
 
           rm -rf out && mkdir -p out/Payload
           cp -R "$APP_PATH" out/Payload/
