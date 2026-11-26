@@ -86,7 +86,7 @@ jobs:
             --configuration=release_arm64 \
             --overrideBazelVersion="${{ inputs.bazel_override }}" \
             --overrideXcodeVersion="$XCODE_VER" \
-            2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+                        > "$GITHUB_WORKSPACE/build.log" 2>&1
 
       - name: Locate .app
         run: |
