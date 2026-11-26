@@ -60,6 +60,7 @@ jobs:
         working-directory: telegram-ios
         run: |
           echo 'common --//Telegram:disableProvisioningProfiles' >> .bazelrc
+          echo 'common --//Telegram:disableExtensions' >> .bazelrc
 
       - name: Generate Xcode project
         working-directory: telegram-ios
@@ -103,6 +104,7 @@ jobs:
             2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
           if [ -f xcodeproj.bazelrc ]; then
             echo 'build --//Telegram:disableProvisioningProfiles' >> xcodeproj.bazelrc
+            echo 'build --//Telegram:disableExtensions' >> xcodeproj.bazelrc
           fi
 
       - name: Build with xcodebuild
