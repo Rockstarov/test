@@ -65,7 +65,32 @@ jobs:
         working-directory: telegram-ios
         run: |
           set -euo pipefail
-          mkdir -p build-system/empty-signing/profiles build-system/empty-signing/certs
+          SIGN_DIR=build-system/empty-signing
+          mkdir -p "$SIGN_DIR/profiles" "$SIGN_DIR/certs"
+
+          # Make.py С‚СЂРµР±СѓРµС‚ aps-environment РІ РїСЂРѕС„РёР»Рµ, РЅРѕ Bazel РїСЂРѕС„РёР»Рё РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚
+          # (РѕС‚РєР»СЋС‡РµРЅС‹ С‡РµСЂРµР· --//Telegram:disableProvisioningProfiles). Р”РµР»Р°РµРј С„РµР№РєРѕРІС‹Р№.
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$SIGN_DIR/key.pem" -out "$SIGN_DIR/cert.pem" -subj "/CN=fake" >/dev/null 2>&1
+          cat > "$SIGN_DIR/profile.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>Entitlements</key>
+            <dict>
+              <key>application-identifier</key>
+              <string>XXXXXXXXXX.com.example.tgclone.Telegram</string>
+              <key>aps-environment</key>
+              <string>development</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
+          openssl smime -sign -binary -nodetach -in "$SIGN_DIR/profile.plist" \
+            -signer "$SIGN_DIR/cert.pem" -inkey "$SIGN_DIR/key.pem" \
+            -outform der -out "$SIGN_DIR/profiles/fake.mobileprovision"
+
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-cache" \
             --overrideXcodeVersion \
